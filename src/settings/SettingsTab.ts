@@ -285,6 +285,30 @@ export class SettingsProfilesSettingTab extends PluginSettingTab {
 		}
 
 		new Setting(containerEl)
+			.setName('Always load profile on startup (debug)')
+			.setDesc(createFragment((fragment) => {
+				fragment.append(fragment.createEl('div', { text: 'On vault open, load the shared profile into this vault (download-only). Guarantees opening a vault never overwrites the shared profile. Local changes not yet saved to the profile are discarded on next start.' }), fragment.createEl('div', { text: 'Requires reload for changes to take effect!', cls: 'mod-warning' }));
+			}))
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.getAlwaysLoadOnStart())
+				.onChange(value => {
+					try {
+						if (value !== this.plugin.getAlwaysLoadOnStart()) {
+							this.plugin.setAlwaysLoadOnStart(value);
+							this.plugin.saveSettings()
+								.then(() => {
+									this.display();
+								});
+						}
+					}
+					catch (e) {
+						(e as Error).message = 'Failed to change always load on start! ' + (e as Error).message;
+						console.error(e);
+					}
+				})
+				.toggleEl.setAttr('id', 'always-load-on-start'));
+
+		new Setting(containerEl)
 			.setHeading()
 			.setName('Statusbar interaction')
 			.setDesc('Change the behavior when clicked on the Status bar Icon');

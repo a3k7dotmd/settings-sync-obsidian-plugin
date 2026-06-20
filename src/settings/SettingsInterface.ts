@@ -31,6 +31,9 @@ export interface VaultSettings {
 	profileUpdateDelay: number;
 	uiUpdate: boolean;
 	uiUpdateInterval: number;
+
+	/** Debug safety: always load the shared profile into this vault on startup (download-only, never uploads). */
+	alwaysLoadOnStart: boolean;
 	devices: Device;
 	statusbarInteraction: {
 		click: StatusbarClickAction,
@@ -48,6 +51,7 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 	profileUpdateDelay: 800,
 	uiUpdate: true,
 	uiUpdateInterval: 1000,
+	alwaysLoadOnStart: true,
 	devices: {},
 	statusbarInteraction: {
 		click: 'auto',

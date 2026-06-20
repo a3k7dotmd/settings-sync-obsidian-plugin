@@ -128,12 +128,93 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 				},
 			});
 		}
+
+		/*
+		 * Debug safety hook: load the shared profile into this vault on startup (download-only).
+		 * This guarantees opening a vault can never push stale local settings up and overwrite the
+		 * shared profile while we get the upload/sync detection right. Removable later.
+		 */
+		if (this.getAlwaysLoadOnStart()) {
+			this.app.workspace.onLayoutReady(() => this.loadProfileOnStartup());
+		}
 	}
 
 	onunload() {
 		if (this.settingsListener) {
 			this.settingsListener.close();
 		}
+	}
+
+	/**
+	 * Debug safety hook. On vault start, make this vault mirror the shared profile by loading it.
+	 * Only prompts a reload when the load actually changed something, otherwise it is a silent no-op.
+	 */
+	private loadProfileOnStartup() {
+		try {
+			this.refreshProfilesList();
+			const profile = this.getCurrentProfile();
+			if (!profile) {
+				// eslint-disable-next-line no-console -- intentional debug log for the startup safety hook
+				console.log('[Settings Profiles] Startup load: no active profile, skipping.');
+				return;
+			}
+
+			if (!this.wouldLoadChangeVault(profile)) {
+				// eslint-disable-next-line no-console -- intentional debug log for the startup safety hook
+				console.log(`[Settings Profiles] Startup load: vault already matches profile "${profile.name}".`);
+				return;
+			}
+
+			// eslint-disable-next-line no-console -- intentional debug log for the startup safety hook
+			console.log(`[Settings Profiles] Startup load: applying shared profile "${profile.name}" to this vault (download-only).`);
+			this.loadProfileSettings(profile)
+				.then((loaded) => {
+					if (loaded) {
+						this.updateCurrentProfile(loaded);
+					}
+					new DialogModal(this.app, 'Reload Obsidian now?', 'The shared profile was loaded on startup. Reload to apply.', () => {
+						this.saveSettings().then(() => {
+							this.app.commands.executeCommandById('app:reload');
+						});
+					}, () => {
+						this.saveSettings();
+						new Notice('Settings profile loaded on startup - reload Obsidian to apply.', 5000);
+					}, 'Reload')
+						.open();
+				});
+		}
+		catch (e) {
+			(e as Error).message = '[Settings Profiles] Startup load failed! ' + (e as Error).message;
+			console.error(e);
+		}
+	}
+
+	/**
+	 * Whether loading the given profile would change this vault. Mirrors the file selection in
+	 * {@link loadProfile} (changed files to copy + files that would be pruned), so the startup
+	 * hook only disrupts the user with a reload prompt when there is actually something to apply.
+	 * @param profile The profile that would be loaded
+	 */
+	private wouldLoadChangeVault(profile: ProfileOptions): boolean {
+		const sourcePath = [this.getAbsoluteProfilesPath(), profile.name];
+		const targetPath = [getVaultPath(), this.app.vault.configDir];
+
+		if (!existsSync(join(...sourcePath))) {
+			return false;
+		}
+
+		let patterns = getConfigFilesList(profile);
+		patterns = filterIgnoreFilesList(patterns, profile);
+
+		let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
+		filesList = filterIgnoreFilesList(filesList, profile);
+		if (filterChangedFiles(filesList, sourcePath, targetPath).length > 0) {
+			return true;
+		}
+
+		const ownPluginDir = normalize(join('plugins', this.manifest.id)) + sep;
+		return getRemovedFiles(patterns, sourcePath, targetPath, profile)
+			.some(file => !normalize(file).startsWith(ownPluginDir));
 	}
 
 	/**
@@ -887,6 +968,14 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 	setProfileUpdate(value: boolean) {
 		this.vaultSettings.profileUpdate = value;
+	}
+
+	getAlwaysLoadOnStart() {
+		return this.vaultSettings.alwaysLoadOnStart;
+	}
+
+	setAlwaysLoadOnStart(value: boolean) {
+		this.vaultSettings.alwaysLoadOnStart = value;
 	}
 
 	getStatusbarInteraction(mod?: 'ctrl' | 'shift' | 'alt') {
