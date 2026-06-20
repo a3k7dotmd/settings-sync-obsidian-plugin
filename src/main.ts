@@ -13,9 +13,10 @@ import { ICON_CURRENT_PROFILE, ICON_NO_CURRENT_PROFILE, ICON_UNLOADED_PROFILE, I
 import { machineIdSync } from 'node-machine-id';
 
 /*
- * Files Obsidian rewrites on its own (window layout, file-recovery snapshots), independent of any
- * user setting change. They must not trigger an auto-save, otherwise every settings-close (and
- * every layout change) would upload, churning the profile and bumping the sync revision for noise.
+ * Per-vault / self-rewriting files that must NOT be synced. workspace.json holds the window layout
+ * and open files, so syncing it closes the open notes in the receiving vault; file-recovery.json is
+ * local recovery state. They are excluded from both the copy (save/load) and the change-detection
+ * triggers, so they never sync and never churn the profile or bump the sync revision.
  */
 const VOLATILE_FILES = ['workspace.json', 'workspaces.json', 'file-recovery.json'].map(file => normalize(file));
 
@@ -925,6 +926,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			// Copy added/changed files from the vault into the profile
 			let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 			filesList = filterIgnoreFilesList(filesList, profile);
+			filesList = filesList.filter(file => !VOLATILE_FILES.contains(normalize(file)));
 			filesList = filterChangedFiles(filesList, sourcePath, targetPath);
 
 			filesList.forEach(file => {
@@ -984,6 +986,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			// Copy added/changed files from the profile into the vault
 			let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 			filesList = filterIgnoreFilesList(filesList, profile);
+			filesList = filesList.filter(file => !VOLATILE_FILES.contains(normalize(file)));
 			filesList = filterChangedFiles(filesList, sourcePath, targetPath);
 
 			filesList.forEach(file => {
