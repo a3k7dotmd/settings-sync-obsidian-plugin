@@ -310,6 +310,20 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	}
 
 	/**
+	 * Whether a config file (relative path) should be synced. Excludes self-rewriting files
+	 * (workspace.json, ...) and this plugin's own folder - the plugin is installed manually per
+	 * vault, so syncing its code would risk overwriting a vault's copy with a mismatched version.
+	 * @param file Relative config file path
+	 */
+	private isSyncableFile(file: string): boolean {
+		const normalized = normalize(file);
+		if (VOLATILE_FILES.contains(normalized)) {
+			return false;
+		}
+		return !normalized.startsWith(normalize(join('plugins', this.manifest.id)) + sep);
+	}
+
+	/**
 	 * The non-volatile files this vault would upload to the profile (changed files + files removed
 	 * from the vault that should be pruned from the profile). Empty means the profile already
 	 * matches this vault.
@@ -329,8 +343,8 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 		filesList = filterIgnoreFilesList(filesList, profile);
 
-		// Ignore self-rewriting files so layout/recovery noise does not trigger an upload
-		filesList = filesList.filter(file => !VOLATILE_FILES.contains(normalize(file)));
+		// Exclude self-rewriting files and this plugin's own folder from the upload trigger
+		filesList = filesList.filter(file => this.isSyncableFile(file));
 		const changed = filterChangedFiles(filesList, sourcePath, targetPath);
 
 		const removed = getRemovedFiles(patterns, sourcePath, targetPath, profile);
@@ -928,7 +942,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			// Copy added/changed files from the vault into the profile
 			let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 			filesList = filterIgnoreFilesList(filesList, profile);
-			filesList = filesList.filter(file => !VOLATILE_FILES.contains(normalize(file)));
+			filesList = filesList.filter(file => this.isSyncableFile(file));
 			filesList = filterChangedFiles(filesList, sourcePath, targetPath);
 
 			filesList.forEach(file => {
@@ -988,7 +1002,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			// Copy added/changed files from the profile into the vault
 			let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 			filesList = filterIgnoreFilesList(filesList, profile);
-			filesList = filesList.filter(file => !VOLATILE_FILES.contains(normalize(file)));
+			filesList = filesList.filter(file => this.isSyncableFile(file));
 			filesList = filterChangedFiles(filesList, sourcePath, targetPath);
 
 			filesList.forEach(file => {

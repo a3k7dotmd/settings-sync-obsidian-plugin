@@ -20,6 +20,9 @@ This plugin is **not** in the Obsidian community store — install it manually i
 
 To update later, replace those three files with the newer ones and reload Obsidian. Do not overwrite `data.json` — it holds this vault's local settings.
 
+> [!NOTE]
+> **The plugin does not sync itself.** Its own folder (`plugins/settings-sync/`) is excluded from the synced files, so loading a profile never overwrites a vault's copy of the plugin with a different version. Install and update the plugin in each vault yourself (from the release); it is neither pushed to nor pulled from the shared profile store.
+
 ---
 
 Allows you to create various global settings profiles. You can sync them between different vaults. To keep all your settings in sync, you'll never have to manually adjust them again for every vault you have or create in the future.

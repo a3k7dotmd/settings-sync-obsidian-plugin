@@ -1,7 +1,7 @@
 {
 	"id": "settings-sync",
 	"name": "Settings Sync",
-	"version": "0.7.2",
+	"version": "0.7.3",
 	"minAppVersion": "0.15.0",
 	"description": "Sync your Obsidian settings — appearance, hotkeys, core and community plugins — between vaults through shared profiles, with reliable automatic two-way sync that works on network/SMB shares.",
 	"author": "a3k7dotmd",
