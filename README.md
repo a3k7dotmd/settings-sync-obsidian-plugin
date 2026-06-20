@@ -1,9 +1,26 @@
-> [!IMPORTANT]
-> ***Refactoring in Progress – Feedback Wanted!***
->
-> We are currently planning a significant refactoring of this plugin to improve its structure, maintainability, and future development.
->
-> If you have suggestions, questions, ideas, or simply want to see what’s being planned, please check out the [discussion](https://github.com/4Source/settings-profiles-obsidian-plugin/discussions/72) and share your thoughts. Your feedback is greatly appreciated!
+# Settings Sync
+
+A fork of [Settings Profiles](https://github.com/4Source/settings-profiles-obsidian-plugin) by 4Source, reworked for **reliable two-way settings sync across vaults** — including when the shared profile store lives on a **network / SMB share**. It uses a distinct plugin id (`settings-sync`) so it never conflicts with or gets overwritten by the upstream plugin.
+
+### What changed from the original, and why
+
+- **Plugin deletions now propagate.** Removing a community plugin used to reappear on the next load. Save/load now mirror the source instead of only ever adding files.
+- **Auto-sync actually works.** The original relied on `fs.watch` + file modification times — which don't fire / aren't reliable on network shares — and its change detection was effectively disabled by an `async`-callback bug. This fork **uploads when the settings window closes** and **pulls remote changes via a revision marker** (checked on startup and every 30s), with no `fs.watch` and no reliance on mtime.
+- **`workspace.json` is no longer synced.** Syncing it closed your open notes in the receiving vault; it (and `file-recovery.json`) are now excluded.
+- **Reliability & performance fixes.** No more apply-revert (a loaded change overwritten by Obsidian before reload), no settings-flush race on save, and the device id is read once instead of every poll — so there are no recurring `setInterval` console violations.
+- **Defaults:** Ctrl-click the status bar = Save, Shift-click = Load.
+
+## Manual installation
+
+This plugin is **not** in the Obsidian community store — install it manually:
+
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/a3k7dotmd/settings-sync-obsidian-plugin/releases/latest).
+2. Create the folder `<your vault>/.obsidian/plugins/settings-sync/` and copy the three files into it.
+3. In Obsidian open **Settings → Community plugins**, **Reload plugins**, then enable **Settings Sync**.
+
+To update later, replace those three files with the newer ones and reload Obsidian. Do not overwrite `data.json` — it holds this vault's local settings.
+
+---
 
 Allows you to create various global settings profiles. You can sync them between different vaults. To keep all your settings in sync, you'll never have to manually adjust them again for every vault you have or create in the future.
 
