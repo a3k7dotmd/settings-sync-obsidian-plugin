@@ -147,7 +147,7 @@ export const PROFILE_OPTIONS_MAP: ProfileOptionsMap = {
 		name: 'Community plugins',
 		description: 'Says whether the community plugins and there settings will sync.',
 		file: ['community-plugins.json', `plugins${slash}*${slash}*`],
-		ignore: `plugins${slash}settings-profiles${slash}data.json`,
+		ignore: `plugins${slash}settings-sync${slash}data.json`,
 	},
 
 	/*

@@ -1,7 +1,7 @@
 {
-	"name": "settings-profiles-obsidian-plugin",
-	"version": "0.7.1",
-	"description": "This plugin is for global setting profiles in Obsidian (https://obsidian.md)",
+	"name": "settings-sync-obsidian-plugin",
+	"version": "0.7.2",
+	"description": "Sync Obsidian settings between vaults through shared profiles (fork of settings-profiles)",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
