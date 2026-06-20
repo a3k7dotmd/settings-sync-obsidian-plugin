@@ -1,10 +1,10 @@
 import { Notice, debounce } from 'obsidian';
 import { SettingsProfilesSettingTab } from 'src/settings/SettingsTab';
 import { ProfileSwitcherModal } from './modals/ProfileSwitcherModal';
-import { copyFile, ensurePathExist, getVaultPath, isValidPath, removeDirectoryRecursiveSync } from './util/FileSystem';
+import { copyFile, ensurePathExist, getVaultPath, isValidPath, removeDirectoryRecursiveSync, removeFile } from './util/FileSystem';
 import { DEFAULT_VAULT_SETTINGS, VaultSettings, ProfileOptions, GlobalSettings, DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROFILE_OPTIONS, DEFAULT_PROFILE_PATH, StatusbarClickAction } from './settings/SettingsInterface';
-import { containsChangedFiles, filterChangedFiles, filterIgnoreFilesList, getConfigFilesList, getFilesWithoutPlaceholder, getIgnoreFilesList, loadProfileOptions, loadProfilesOptions, saveProfileOptions } from './util/SettingsFiles';
-import { isAbsolute, join, normalize } from 'path';
+import { containsChangedFiles, filterChangedFiles, filterIgnoreFilesList, getConfigFilesList, getFilesWithoutPlaceholder, getIgnoreFilesList, getRemovedFiles, loadProfileOptions, loadProfilesOptions, saveProfileOptions } from './util/SettingsFiles';
+import { isAbsolute, join, normalize, sep } from 'path';
 import { FSWatcher, existsSync, watch } from 'fs';
 import { DialogModal } from './modals/DialogModal';
 import PluginExtended from './core/PluginExtended';
@@ -369,10 +369,16 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 				return false;
 			}
 
-			let filesList = getConfigFilesList(profile);
-			filesList = getFilesWithoutPlaceholder(filesList, sourcePath);
+			const patterns = getConfigFilesList(profile);
+			let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 			filesList = filterIgnoreFilesList(filesList, profile);
-			return !containsChangedFiles(filesList, sourcePath, targetPath);
+
+			/*
+			 * Not saved if a managed file changed or if the profile still holds a file that was
+			 * deleted from the vault (e.g. an uninstalled plugin that has not been pruned yet).
+			 */
+			return !containsChangedFiles(filesList, sourcePath, targetPath) &&
+				getRemovedFiles(patterns, sourcePath, targetPath, profile).length === 0;
 		}
 		catch (e) {
 			(e as Error).message = 'Failed to check settings changed! ' + (e as Error).message + ` Profile: ${JSON.stringify(profile)}`;
@@ -606,9 +612,12 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			// Check target dir exist
 			ensurePathExist([...targetPath]);
 
-			let filesList = getConfigFilesList(profile);
-			filesList = filterIgnoreFilesList(filesList, profile);
-			filesList = getFilesWithoutPlaceholder(filesList, sourcePath);
+			// Patterns (may contain placeholders) for the enabled options
+			let patterns = getConfigFilesList(profile);
+			patterns = filterIgnoreFilesList(patterns, profile);
+
+			// Copy added/changed files from the vault into the profile
+			let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 			filesList = filterIgnoreFilesList(filesList, profile);
 			filesList = filterChangedFiles(filesList, sourcePath, targetPath);
 
@@ -617,6 +626,16 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 					changed = true;
 					copyFile([...sourcePath, file], [...targetPath, file]);
 				}
+			});
+
+			/*
+			 * Propagate deletions: remove files from the profile that no longer exist in the vault
+			 * (e.g. an uninstalled plugin). Without this the profile only ever grows and deleted
+			 * plugins reappear on the next load.
+			 */
+			getRemovedFiles(patterns, sourcePath, targetPath, profile).forEach(file => {
+				changed = true;
+				removeFile([...targetPath, file], targetPath);
 			});
 
 			// Update profile data
@@ -650,9 +669,12 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 				throw Error(`Source path do not exist! SourcePath: ${join(...sourcePath)}`);
 			}
 
-			let filesList = getConfigFilesList(profile);
-			filesList = filterIgnoreFilesList(filesList, profile);
-			filesList = getFilesWithoutPlaceholder(filesList, sourcePath);
+			// Patterns (may contain placeholders) for the enabled options
+			let patterns = getConfigFilesList(profile);
+			patterns = filterIgnoreFilesList(patterns, profile);
+
+			// Copy added/changed files from the profile into the vault
+			let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 			filesList = filterIgnoreFilesList(filesList, profile);
 			filesList = filterChangedFiles(filesList, sourcePath, targetPath);
 
@@ -661,6 +683,18 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 					copyFile([...sourcePath, file], [...targetPath, file]);
 				}
 			});
+
+			/*
+			 * Propagate deletions: remove files from the vault that are not part of the profile
+			 * (e.g. a plugin uninstalled in another vault), so loading makes the vault mirror the
+			 * profile. Never touch this plugin's own folder, removing it mid-session would break it.
+			 */
+			const ownPluginDir = normalize(join('plugins', this.manifest.id)) + sep;
+			getRemovedFiles(patterns, sourcePath, targetPath, profile)
+				.filter(file => !normalize(file).startsWith(ownPluginDir))
+				.forEach(file => {
+					removeFile([...targetPath, file], targetPath);
+				});
 
 			// Change active profile
 			this.updateCurrentProfile(profile);
