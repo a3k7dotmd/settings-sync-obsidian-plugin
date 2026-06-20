@@ -34,6 +34,12 @@ export interface VaultSettings {
 
 	/** Last profile sync-marker revision this vault has synced (saved or loaded). Per-vault, not synced. */
 	lastSyncedRev: number;
+
+	/** Poll the shared profile and reload when another vault has saved a newer revision. */
+	autoReloadRemote: boolean;
+
+	/** How often (ms) to poll the shared profile for changes from other vaults. */
+	remotePollInterval: number;
 	devices: Device;
 	statusbarInteraction: {
 		click: StatusbarClickAction,
@@ -52,6 +58,8 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 	uiUpdate: true,
 	uiUpdateInterval: 1000,
 	lastSyncedRev: 0,
+	autoReloadRemote: true,
+	remotePollInterval: 30000,
 	devices: {},
 	statusbarInteraction: {
 		click: 'auto',

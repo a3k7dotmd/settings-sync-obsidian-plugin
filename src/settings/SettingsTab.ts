@@ -285,6 +285,84 @@ export class SettingsProfilesSettingTab extends PluginSettingTab {
 		}
 
 		new Setting(containerEl)
+			.setName('Auto-reload from other vaults')
+			.setDesc(createFragment((fragment) => {
+				fragment.append(fragment.createEl('div', { text: 'Poll the shared profile and load it when another vault has saved newer settings.' }), fragment.createEl('div', { text: 'Requires reload for changes to take effect!', cls: 'mod-warning' }));
+			}))
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.getAutoReloadRemote())
+				.onChange(value => {
+					try {
+						if (value !== this.plugin.getAutoReloadRemote()) {
+							this.plugin.setAutoReloadRemote(value);
+							this.plugin.saveSettings()
+								.then(() => {
+									this.display();
+								});
+						}
+					}
+					catch (e) {
+						(e as Error).message = 'Failed to change auto-reload from other vaults! ' + (e as Error).message;
+						console.error(e);
+					}
+				})
+				.toggleEl.setAttr('id', 'auto-reload-remote'));
+
+		if (this.plugin.getAutoReloadRemote()) {
+			new Setting(containerEl)
+				.setName('Auto-reload poll interval')
+				.setDesc(createFragment((fragment) => {
+					fragment.append(fragment.createEl('div', { text: 'The time in ms between checks of the shared profile for changes from other vaults.' }), fragment.createEl('div', { text: 'Requires reload for changes to take effect!', cls: 'mod-warning' }));
+				}))
+				.addExtraButton(button => button
+					.setIcon(ICON_RESET)
+					.setTooltip('Reset')
+					.onClick(() => {
+						try {
+							const sliderEl: HTMLInputElement | null = this.containerEl.querySelector('#remote-poll-interval');
+							if (!sliderEl) {
+								throw Error('Input element not found! #remote-poll-interval');
+							}
+
+							sliderEl.valueAsNumber = DEFAULT_VAULT_SETTINGS.remotePollInterval;
+							this.plugin.setRemotePollInterval(sliderEl.valueAsNumber);
+
+							this.plugin.saveSettings()
+								.then(() => {
+									this.display();
+								});
+						}
+						catch (e) {
+							(e as Error).message = 'Failed to reset auto-reload poll interval! ' + (e as Error).message;
+							console.error(e);
+						}
+					}))
+				.addSlider(slider => slider
+					.setLimits(5000, 300000, 5000)
+					.setValue(this.plugin.getRemotePollInterval())
+					.setDynamicTooltip()
+					.onChange(value => {
+						debounce((value: number) => {
+							try {
+								if (value !== this.plugin.getRemotePollInterval()) {
+									this.plugin.setRemotePollInterval(value);
+
+									this.plugin.saveSettings()
+										.then(() => {
+											this.display();
+										});
+								}
+							}
+							catch (e) {
+								(e as Error).message = 'Failed to change auto-reload poll interval! ' + (e as Error).message;
+								console.error(e);
+							}
+						}, 500, true).call(this, value);
+					})
+					.sliderEl.setAttr('id', 'remote-poll-interval'));
+		}
+
+		new Setting(containerEl)
 			.setHeading()
 			.setName('Statusbar interaction')
 			.setDesc('Change the behavior when clicked on the Status bar Icon');
