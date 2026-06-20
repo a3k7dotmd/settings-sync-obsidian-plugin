@@ -249,6 +249,30 @@ export function isValidPath(path: string[]) {
 }
 
 /**
+ * Removes a single file and prunes parent directories that become empty as a result.
+ * Used to propagate deletions (e.g. an uninstalled plugin) from one side of a profile sync to the other.
+ * @param filePath The file to remove
+ * @param basePath Pruning stops at this directory. Empty directories between the file and the base are removed, the base itself is kept.
+ */
+export function removeFile(filePath: string[], basePath: string[]) {
+	const file = normalize(join(...filePath));
+	const base = normalize(join(...basePath));
+
+	// Only remove existing regular files
+	if (!existsSync(file) || !statSync(file).isFile()) {
+		return;
+	}
+	unlinkSync(file);
+
+	// Prune now-empty parent directories up to (but not including) the base path
+	let dir = dirname(file);
+	while (dir.length > base.length && dir.startsWith(base) && existsSync(dir) && statSync(dir).isDirectory() && readdirSync(dir).length === 0) {
+		rmdirSync(dir);
+		dir = dirname(dir);
+	}
+}
+
+/**
  * Remove recursive Folder Structure
  * @param path The folder to remove
  */

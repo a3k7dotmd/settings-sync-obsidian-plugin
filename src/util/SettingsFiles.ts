@@ -205,6 +205,30 @@ export function getFilesWithoutPlaceholder(filesList: string[], path: string[]):
 }
 
 /**
+ * Returns the managed files that exist in the target but no longer exist in the source.
+ * These are deletions (e.g. an uninstalled plugin, a removed snippet/theme) that need to be
+ * propagated so the target becomes a mirror of the source instead of only ever growing.
+ *
+ * Both sides are expanded from the same patterns, so fixed (non placeholder) files like
+ * `app.json` are always present in both lists and are never reported as removed.
+ * @param patterns The config file patterns (may contain placeholders) for the enabled options
+ * @param sourcePath The source base path
+ * @param targetPath The target base path
+ * @param profile The profile (used to respect the ignore list)
+ * @returns The relative file paths that exist in target but not in source
+ */
+export function getRemovedFiles(patterns: string[], sourcePath: string[], targetPath: string[], profile: ProfileOptions): string[] {
+	let sourceFiles = getFilesWithoutPlaceholder(patterns, sourcePath);
+	sourceFiles = filterIgnoreFilesList(sourceFiles, profile);
+
+	let targetFiles = getFilesWithoutPlaceholder(patterns, targetPath);
+	targetFiles = filterIgnoreFilesList(targetFiles, profile);
+
+	const sourceSet = new Set(sourceFiles);
+	return targetFiles.filter(file => !sourceSet.has(file));
+}
+
+/**
  * Returns all ignore files if they are enabeled in profile
  * @param profile The profile for which the files will be returned
  * @returns an array of file names
