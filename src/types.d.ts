@@ -11,8 +11,7 @@ declare module 'obsidian' {
 	}
 
 	interface SettingsModalHandle {
-		open(): void;
-		close(): void;
+		containerEl?: HTMLElement;
 	}
 
 	interface SuggestModal<T> {
