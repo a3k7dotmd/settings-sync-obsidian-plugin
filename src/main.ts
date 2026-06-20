@@ -154,6 +154,11 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		 * save with no workspace.json loop. fs.watch can not see another machine's writes on a share.
 		 */
 		if (this.getProfileUpdate() && this.getAutoReloadRemote()) {
+			/*
+			 * Check once on startup so a freshly opened vault picks up remote changes right away
+			 * instead of waiting for the first poll, then keep polling on the interval.
+			 */
+			this.app.workspace.onLayoutReady(() => this.checkRemoteChanges());
 			this.registerInterval(window.setInterval(() => this.checkRemoteChanges(), this.getRemotePollInterval()));
 		}
 	}
