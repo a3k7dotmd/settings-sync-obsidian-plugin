@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 
 /**
@@ -44,6 +45,30 @@ export function readSyncMarker(profileDir: string[]): SyncMarker | undefined {
 	}
 	catch (e) {
 		console.warn('[Settings Profiles] Failed to read sync marker!', e);
+		return undefined;
+	}
+}
+
+/**
+ * Asynchronously reads the sync marker. Used on the polling path so the network round-trip does
+ * not block the timer handler (which triggers "setInterval handler took Nms" violations on a share).
+ * A single readFile is used (no exists/stat round-trips); a missing file resolves to `undefined`.
+ * @param profileDir Path parts to the profile directory
+ * @returns The marker, or `undefined` if missing/invalid
+ */
+export async function readSyncMarkerAsync(profileDir: string[]): Promise<SyncMarker | undefined> {
+	const file = join(...profileDir, SYNC_MARKER_FILE);
+	try {
+		const data = JSON.parse(await readFile(file, 'utf-8')) as Partial<SyncMarker>;
+		if (typeof data.rev !== 'number') {
+			return undefined;
+		}
+		return { rev: data.rev, savedBy: data.savedBy ?? '', savedAt: data.savedAt ?? '' };
+	}
+	catch (e) {
+		if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+			console.warn('[Settings Profiles] Failed to read sync marker (async)!', e);
+		}
 		return undefined;
 	}
 }
