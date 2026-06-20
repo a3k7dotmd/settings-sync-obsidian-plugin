@@ -164,9 +164,11 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			 * marker read is fresh, then keep polling on the interval.
 			 */
 			this.app.workspace.onLayoutReady(() => {
-				this.registerInterval(window.setTimeout(() => this.checkRemoteChanges(), 3000));
+				this.registerInterval(window.setTimeout(() => void this.checkRemoteChanges(), 3000));
 			});
-			this.registerInterval(window.setInterval(() => this.checkRemoteChanges(), this.getRemotePollInterval()));
+
+			// Fire-and-forget (void), so the async marker read is not attributed to the timer handler
+			this.registerInterval(window.setInterval(() => void this.checkRemoteChanges(), this.getRemotePollInterval()));
 		}
 	}
 
@@ -404,8 +406,11 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			const remoteRev = marker?.rev ?? 0;
 			this.lastKnownRemoteRev = remoteRev;
 
-			// eslint-disable-next-line no-console -- diagnostic for the remote sync
-			console.log(`[Settings Profiles] Remote check: marker rev=${remoteRev}, local lastSyncedRev=${this.getLastSyncedRev()}, dismissedRev=${this.dismissedRev}.`);
+			// Only log when out of sync - avoid every-30s console noise once caught up
+			if (remoteRev !== this.getLastSyncedRev()) {
+				// eslint-disable-next-line no-console -- diagnostic for the remote sync
+				console.log(`[Settings Profiles] Remote check: marker rev=${remoteRev}, local lastSyncedRev=${this.getLastSyncedRev()}, dismissedRev=${this.dismissedRev}.`);
+			}
 
 			/*
 			 * Nothing to pull if up to date, no marker, or already dismissed for this rev. We do NOT
