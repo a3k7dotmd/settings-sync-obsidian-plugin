@@ -1,4 +1,4 @@
-import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'fs';
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, rmdirSync, statSync, unlinkSync } from 'fs';
 import { FileSystemAdapter } from 'obsidian';
 import { basename, dirname, join, normalize, sep as slash } from 'path';
 import { PassThrough, Readable } from 'stream';
@@ -323,6 +323,31 @@ export function getVaultPath() {
 export const FILE_IGNORE_LIST = [
 	'.DS_Store',
 ];
+
+/**
+ * Synchronously checks whether two files have byte-for-byte identical content.
+ *
+ * The streaming {@link filesEqual} below returns a Promise, which can not be used inside
+ * synchronous `Array.filter`/`Array.some`/`Array.every` predicates (a Promise is always
+ * truthy there). Change detection runs in those synchronous contexts, so it needs this.
+ * @param file1 File path of first file
+ * @param file2 File path of second file
+ * @returns Are the files byte-for-byte equal
+ */
+export function filesEqualSync(file1: string, file2: string): boolean {
+	if (!existsSync(file1) || !existsSync(file2)) {
+		return false;
+	}
+	if (!statSync(file1).isFile() || !statSync(file2).isFile()) {
+		return false;
+	}
+
+	// Fast path: different sizes can not be equal
+	if (statSync(file1).size !== statSync(file2).size) {
+		return false;
+	}
+	return readFileSync(file1).equals(readFileSync(file2));
+}
 
 /*
  * ----------------------------------------------------//

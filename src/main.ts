@@ -24,10 +24,13 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		this.addSettingTab(new SettingsProfilesSettingTab(this.app, this));
 
 		// Add settings change listener
-		/** @todo watch didn't support recursive on Linux */
 		if (this.getProfileUpdate()) {
-			this.settingsListener = watch(join(getVaultPath(), this.app.vault.configDir), { recursive: true }, debounce((eventType, filename) => {
-				if (eventType !== 'change' || !filename) return;
+			const onSettingsChange = debounce((_eventType: string, filename: string | null) => {
+				/*
+				 * Accept both 'change' (in-place edit) and 'rename' (create/delete, e.g. installing
+				 * or removing a plugin). Filtering to 'change' only missed plugin install/uninstall.
+				 */
+				if (!filename) return;
 
 				const profile = this.getCurrentProfile();
 				if (profile) {
@@ -40,7 +43,20 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 						this.updateCurrentProfile(profile);
 					}
 				}
-			}, this.getProfileUpdateDelay(), true));
+			}, this.getProfileUpdateDelay(), true);
+
+			/*
+			 * Recursive watch is supported on macOS/Windows and on modern Node/Electron on Linux.
+			 * On older builds it can throw ERR_FEATURE_UNAVAILABLE_ON_PLATFORM; fall back to a
+			 * non-recursive watch (top-level config files) so onload never fails because of it.
+			 */
+			try {
+				this.settingsListener = watch(join(getVaultPath(), this.app.vault.configDir), { recursive: true }, onSettingsChange);
+			}
+			catch (e) {
+				console.warn('Recursive settings watch unavailable, falling back to non-recursive watch.', e);
+				this.settingsListener = watch(join(getVaultPath(), this.app.vault.configDir), onSettingsChange);
+			}
 		}
 
 		// Update UI at Interval

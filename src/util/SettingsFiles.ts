@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join, normalize, sep as slash } from 'path';
 import { PROFILE_OPTIONS_MAP, ProfileOptions } from 'src/settings/SettingsInterface';
-import { ensurePathExist, filesEqual, getAllFiles, isValidPath } from './FileSystem';
+import { ensurePathExist, filesEqualSync, getAllFiles, isValidPath } from './FileSystem';
 
 /**
  * Saves the profile options data to the path.
@@ -304,7 +304,7 @@ export function filterUnchangedFiles(filesList: string[], sourcePath: string[], 
 			return false;
 		}
 
-		return filesEqual(sourceFile, targetFile);
+		return filesEqualSync(sourceFile, targetFile);
 	});
 }
 
@@ -347,7 +347,12 @@ export function filterChangedFiles(filesList: string[], sourcePath: string[], ta
 			return true;
 		}
 
-		return !filesEqual(sourceFile, targetFile);
+		/*
+		 * Same size: compare content. `filesEqualSync` is synchronous, the previous
+		 * `!filesEqual(...)` returned `!Promise` (always false), so same-size content
+		 * changes were silently never copied.
+		 */
+		return !filesEqualSync(sourceFile, targetFile);
 	});
 }
 
@@ -383,42 +388,51 @@ export function filterNewerFiles(filesList: string[], sourcePath: string[], targ
 }
 
 /**
- * Check the files list contains a changed file
+ * Check the files list contains a file that changed in source relative to target.
+ *
+ * This is the change-detection used by the auto-sync gate and the status bar, so it runs
+ * frequently (on the UI interval). It is intentionally stat-only (size + modification time)
+ * to stay cheap, especially when the profile store lives on an external/network drive -
+ * it never reads file contents.
+ *
+ * NOTE: the previous implementation was `!filesList.every(async ...)`. An `async` callback
+ * always returns a (truthy) Promise, so `every` was always `true` and this function always
+ * returned `false`. That made `areSettingsSaved()` always report "saved" and was the reason
+ * auto-sync never triggered a save.
  * @param filesList Files list to compare
  * @param sourcePath The path to the source file
  * @param targetPath The path to the target file
- * @returns Is there a changed file
+ * @returns Is there a file that is newer/changed in source than in target
  */
 export function containsChangedFiles(filesList: string[], sourcePath: string[], targetPath: string[]): boolean {
-	return !filesList.every(async (file) => {
+	return filesList.some((file) => {
 		const sourceFile = join(...sourcePath, file);
 
-		// Check source exist and is file
+		// Source missing or not a file: nothing to sync from here
 		if (!existsSync(sourceFile)) {
-			return true;
+			return false;
 		}
 		const sourceStat = statSync(sourceFile);
 		if (!sourceStat.isFile()) {
-			return true;
+			return false;
 		}
 		const targetFile = join(...targetPath, file);
 
-		// Check target don't exist
+		// Present in source but missing in target: changed
 		if (!existsSync(targetFile)) {
-			return false;
+			return true;
 		}
 		const targetStat = statSync(targetFile);
-
-		// Check target is file
 		if (!targetStat.isFile()) {
-			return false;
+			return true;
 		}
 
-		// Check file size
+		// Different size: changed
 		if (sourceStat.size !== targetStat.size) {
-			return false;
+			return true;
 		}
 
-		return await filesEqual(sourceFile, targetFile);
+		// Same size: changed only if source was modified after the saved target copy
+		return sourceStat.mtimeMs > targetStat.mtimeMs;
 	});
 }
