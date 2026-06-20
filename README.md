@@ -69,6 +69,19 @@ Only visible if [Profile update](#Profile_update) enabled.
 **Max:** ``10000ms``
 
 **Default:** ``800ms``
+## Auto-reload the active profile when changed elsewhere
+This setting controls the download half of the sync. When enabled, this vault watches the active profile in the shared store (under the [Profile save path](#Profile_save_path)) and offers to reload it when **another vault** has saved newer settings to that profile. The upload half happens automatically when you close the Obsidian settings window. Detection uses a revision marker that the saving vault writes, so it works on network/SMB shares without relying on file modification times. You must reload Obsidian for changes to this setting to take effect.
+
+**Default:** ```true```
+## Auto-reload poll interval
+This setting controls how often (in milliseconds) this vault checks the shared profile for changes made by other vaults. A check also runs once shortly after the vault starts, so a freshly opened vault picks up changes without waiting for the first poll. You must reload Obsidian for changes to take effect.
+
+Only visible if [Auto-reload the active profile when changed elsewhere](#Auto-reload-the-active-profile-when-changed-elsewhere) enabled.
+
+**Min:** ``5000ms``
+**Max:** ``300000ms``
+
+**Default:** ``30000ms``
 ## Statusbar Interaction
 This setting controls what action is triggered when clicking on the statusbar icon. You can configure different actions for regular clicks and modifier key combinations (Ctrl, Shift, Alt).
 
