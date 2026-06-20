@@ -26,6 +26,8 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	private settingsListener: FSWatcher;
 	private settingsOpen = false;
 	private remoteReloadPending = false;
+	private autoSaveBusy = false;
+	private dismissedRev = 0;
 
 	async onload() {
 		await this.loadSettings();
@@ -155,10 +157,13 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		 */
 		if (this.getProfileUpdate() && this.getAutoReloadRemote()) {
 			/*
-			 * Check once on startup so a freshly opened vault picks up remote changes right away
-			 * instead of waiting for the first poll, then keep polling on the interval.
+			 * Check on startup so a freshly opened vault picks up remote changes without waiting for
+			 * the first poll. A short offset lets Obsidian and the network-share caches settle so the
+			 * marker read is fresh, then keep polling on the interval.
 			 */
-			this.app.workspace.onLayoutReady(() => this.checkRemoteChanges());
+			this.app.workspace.onLayoutReady(() => {
+				this.registerInterval(window.setTimeout(() => this.checkRemoteChanges(), 3000));
+			});
 			this.registerInterval(window.setInterval(() => this.checkRemoteChanges(), this.getRemotePollInterval()));
 		}
 	}
@@ -222,8 +227,35 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		}
 
 		// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
-		console.log('[Settings Profiles] Settings closed -> checking for changes to upload.');
-		this.autoSaveProfile(profile);
+		console.log('[Settings Profiles] Settings closed -> will check for changes to upload.');
+
+		/*
+		 * Obsidian flushes config to disk on a debounce, so the change is usually NOT on disk yet at
+		 * the moment the modal closes. Re-check a few times and upload as soon as it appears.
+		 */
+		this.scheduleAutoSave(profile, 0);
+	}
+
+	/**
+	 * Retries the auto-save check with increasing delays, stopping as soon as something was saved
+	 * (or skipped). Continues only while no change is visible yet, to catch Obsidian's delayed flush.
+	 * @param profile The active profile
+	 * @param attempt The current attempt index
+	 */
+	private scheduleAutoSave(profile: ProfileOptions, attempt: number) {
+		const delays = [600, 1500, 3500];
+		if (attempt >= delays.length) {
+			// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+			console.log('[Settings Profiles] Auto-save: no changes detected to upload.');
+			return;
+		}
+		this.registerInterval(window.setTimeout(() => {
+			this.autoSaveProfile(profile).then(result => {
+				if (result === 'nochange') {
+					this.scheduleAutoSave(profile, attempt + 1);
+				}
+			});
+		}, delays[attempt]));
 	}
 
 	/**
@@ -232,7 +264,11 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	 * overwrite a newer profile, so it is skipped and the user is asked to reload first).
 	 * @param profile The active profile
 	 */
-	private async autoSaveProfile(profile: ProfileOptions) {
+	private async autoSaveProfile(profile: ProfileOptions): Promise<'saved' | 'nochange' | 'skipped' | 'error'> {
+		if (this.autoSaveBusy) {
+			return 'skipped';
+		}
+		this.autoSaveBusy = true;
 		try {
 			/*
 			 * Anti-clobber: do not auto-save over a profile that changed elsewhere since we last
@@ -244,24 +280,27 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 				// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
 				console.warn(`[Settings Profiles] Auto-save skipped: shared profile is newer (rev ${marker.rev} > local ${this.getLastSyncedRev()}). Reload it before saving from this vault.`);
 				new Notice('Shared profile changed elsewhere - reload it before this vault can save.', 8000);
-				return;
+				return 'skipped';
 			}
 
 			const changes = this.pendingUploadChanges(profile);
 			if (changes.length === 0) {
-				// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
-				console.log('[Settings Profiles] Auto-save: no changes to upload.');
-				return;
+				return 'nochange';
 			}
 
 			// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
 			console.log(`[Settings Profiles] Auto-save: uploading ${changes.length} change(s): ${changes.slice(0, 12).join(', ')}${changes.length > 12 ? ', …' : ''}`);
 			await this.saveProfileSettings(profile);
 			new Notice('Saved settings to shared profile.');
+			return 'saved';
 		}
 		catch (e) {
 			(e as Error).message = '[Settings Profiles] Auto-save failed! ' + (e as Error).message;
 			console.error(e);
+			return 'error';
+		}
+		finally {
+			this.autoSaveBusy = false;
 		}
 	}
 
@@ -334,9 +373,11 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	}
 
 	/**
-	 * Polled on an interval. Reads the shared profile's sync marker and, if another vault has saved
-	 * a newer revision, loads it into this vault and prompts a reload. Loading catches lastSyncedRev
-	 * up to the marker rev, so this fires once per remote save (no re-trigger loop).
+	 * Reads the shared profile's sync marker and, if another vault saved a newer revision, prompts a
+	 * reload. The profile is loaded INSIDE the confirm handler, immediately before the reload, so a
+	 * running Obsidian can not re-write its in-memory config over the loaded files (which would leave
+	 * the vault marked synced but with stale settings). On dismiss it neither applies nor catches up,
+	 * but records the rev so it does not nag every poll.
 	 */
 	private async checkRemoteChanges() {
 		if (this.remoteReloadPending) {
@@ -353,33 +394,36 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			}
 
 			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
+			const remoteRev = marker?.rev ?? 0;
+
+			// eslint-disable-next-line no-console -- diagnostic for the remote sync
+			console.log(`[Settings Profiles] Remote check: marker rev=${remoteRev}, local lastSyncedRev=${this.getLastSyncedRev()}, dismissedRev=${this.dismissedRev}.`);
 
 			/*
-			 * Nothing to pull if up to date or no marker yet. We do NOT compare savedBy (machine id):
-			 * two vaults on one machine share it. lastSyncedRev already excludes our own save, since
-			 * saving bumps this vault's lastSyncedRev to the new marker rev.
+			 * Nothing to pull if up to date, no marker, or already dismissed for this rev. We do NOT
+			 * compare savedBy (machine id): two vaults on one machine share it; lastSyncedRev already
+			 * excludes our own save since saving bumps it to the new marker rev.
 			 */
-			if (!marker || marker.rev <= this.getLastSyncedRev()) {
+			if (!marker || remoteRev <= this.getLastSyncedRev() || remoteRev <= this.dismissedRev) {
 				return;
 			}
 
 			// eslint-disable-next-line no-console -- diagnostic for the remote sync
-			console.log(`[Settings Profiles] Remote change detected (rev ${marker.rev} > local ${this.getLastSyncedRev()}, by ${marker.savedBy}) -> loading.`);
+			console.log(`[Settings Profiles] Remote change detected (rev ${remoteRev} > local ${this.getLastSyncedRev()}) -> prompting reload.`);
 			this.remoteReloadPending = true;
 
-			const loaded = await this.loadProfileSettings(profile);
-			if (loaded) {
-				this.updateCurrentProfile(loaded);
-			}
-
-			new DialogModal(this.app, 'Reload Obsidian now?', 'The shared profile was updated in another vault. Reload to apply.', () => {
-				this.saveSettings().then(() => {
-					this.app.commands.executeCommandById('app:reload');
-				});
+			new DialogModal(this.app, 'Profile updated elsewhere', 'Another vault saved newer settings. Reload Obsidian to apply them?', () => {
+				// Confirm: load right before reloading so Obsidian reads the fresh config (no revert).
+				this.loadProfileSettings(profile)
+					.then(() => this.saveSettings())
+					.then(() => {
+						this.app.commands.executeCommandById('app:reload');
+					});
 			}, () => {
-				this.saveSettings();
+				// Dismiss: do not apply or catch up; suppress this rev so we do not re-prompt every poll.
+				this.dismissedRev = remoteRev;
 				this.remoteReloadPending = false;
-				new Notice('Profile updated elsewhere - reload Obsidian to apply.', 8000);
+				new Notice('Profile update postponed - run "Settings profiles: Reload current profile" to apply.', 8000);
 			}, 'Reload')
 				.open();
 		}
