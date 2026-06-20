@@ -31,6 +31,9 @@ export interface VaultSettings {
 	profileUpdateDelay: number;
 	uiUpdate: boolean;
 	uiUpdateInterval: number;
+
+	/** Last profile sync-marker revision this vault has synced (saved or loaded). Per-vault, not synced. */
+	lastSyncedRev: number;
 	devices: Device;
 	statusbarInteraction: {
 		click: StatusbarClickAction,
@@ -48,6 +51,7 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 	profileUpdateDelay: 800,
 	uiUpdate: true,
 	uiUpdateInterval: 1000,
+	lastSyncedRev: 0,
 	devices: {},
 	statusbarInteraction: {
 		click: 'auto',

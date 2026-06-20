@@ -4,12 +4,20 @@ import { ProfileSwitcherModal } from './modals/ProfileSwitcherModal';
 import { copyFile, ensurePathExist, getVaultPath, isValidPath, removeDirectoryRecursiveSync, removeFile } from './util/FileSystem';
 import { DEFAULT_VAULT_SETTINGS, VaultSettings, ProfileOptions, GlobalSettings, DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROFILE_OPTIONS, DEFAULT_PROFILE_PATH, StatusbarClickAction } from './settings/SettingsInterface';
 import { containsChangedFiles, filterChangedFiles, filterIgnoreFilesList, getConfigFilesList, getFilesWithoutPlaceholder, getIgnoreFilesList, getRemovedFiles, loadProfileOptions, loadProfilesOptions, saveProfileOptions } from './util/SettingsFiles';
+import { readSyncMarker, writeSyncMarker } from './util/SyncMarker';
 import { isAbsolute, join, normalize, sep } from 'path';
 import { FSWatcher, existsSync, watch } from 'fs';
 import { DialogModal } from './modals/DialogModal';
 import PluginExtended from './core/PluginExtended';
 import { ICON_CURRENT_PROFILE, ICON_NO_CURRENT_PROFILE, ICON_UNLOADED_PROFILE, ICON_UNSAVED_PROFILE } from './constants';
 import { machineIdSync } from 'node-machine-id';
+
+/*
+ * Files Obsidian rewrites on its own (window layout, file-recovery snapshots), independent of any
+ * user setting change. They must not trigger an auto-save, otherwise every settings-close (and
+ * every layout change) would upload, churning the profile and bumping the sync revision for noise.
+ */
+const VOLATILE_FILES = ['workspace.json', 'workspaces.json', 'file-recovery.json'].map(file => normalize(file));
 
 export default class SettingsProfilesPlugin extends PluginExtended {
 	private vaultSettings: VaultSettings;
@@ -128,11 +136,173 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 				},
 			});
 		}
+
+		/*
+		 * Auto-save (upload) the active profile when the Obsidian settings window is closed.
+		 * fs.watch does not deliver events on network shares, so this is the reliable trigger.
+		 */
+		this.app.workspace.onLayoutReady(() => this.registerSettingsCloseHook());
 	}
 
 	onunload() {
 		if (this.settingsListener) {
 			this.settingsListener.close();
+		}
+	}
+
+	/**
+	 * Hooks the Obsidian settings modal so closing it triggers an auto-save of the active profile.
+	 * The hook is restored on unload.
+	 */
+	private registerSettingsCloseHook() {
+		const settingModal = this.app.setting;
+		if (!settingModal || typeof settingModal.close !== 'function') {
+			// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+			console.warn('[Settings Profiles] Settings-close hook unavailable (app.setting missing); auto-save on settings close disabled.');
+			return;
+		}
+
+		const originalClose = settingModal.close.bind(settingModal);
+		settingModal.close = () => {
+			const result = originalClose();
+			try {
+				this.onSettingsClosed();
+			}
+			catch (e) {
+				console.error('[Settings Profiles] Settings-close handler failed!', e);
+			}
+			return result;
+		};
+
+		// Restore the original close on unload
+		this.register(() => {
+			if (this.app.setting) {
+				this.app.setting.close = originalClose;
+			}
+		});
+
+		// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+		console.log('[Settings Profiles] Auto-save on settings-close is active.');
+	}
+
+	/**
+	 * Called when the Obsidian settings window is closed. Auto-saves the active profile if it
+	 * changed, respecting the profile-update setting and the profile's auto-sync flag.
+	 */
+	private onSettingsClosed() {
+		if (!this.getProfileUpdate()) {
+			return;
+		}
+		const profile = this.getCurrentProfile();
+		if (!profile || !profile.autoSync) {
+			return;
+		}
+
+		// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+		console.log('[Settings Profiles] Settings closed -> checking for changes to upload.');
+		this.autoSaveProfile(profile);
+	}
+
+	/**
+	 * Auto-saves (uploads) the given profile if this vault has non-volatile changes, unless the
+	 * shared profile has advanced beyond what this vault last synced (in which case it would
+	 * overwrite a newer profile, so it is skipped and the user is asked to reload first).
+	 * @param profile The active profile
+	 */
+	private async autoSaveProfile(profile: ProfileOptions) {
+		try {
+			// Anti-clobber: do not auto-save over a profile that changed elsewhere since we last synced
+			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
+			if (marker && marker.rev > this.getLastSyncedRev() && marker.savedBy !== machineIdSync(false)) {
+				// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+				console.warn(`[Settings Profiles] Auto-save skipped: shared profile is newer (rev ${marker.rev} > local ${this.getLastSyncedRev()}). Reload it before saving from this vault.`);
+				new Notice('Shared profile changed elsewhere - reload it before this vault can save.', 8000);
+				return;
+			}
+
+			const changes = this.pendingUploadChanges(profile);
+			if (changes.length === 0) {
+				// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+				console.log('[Settings Profiles] Auto-save: no changes to upload.');
+				return;
+			}
+
+			// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+			console.log(`[Settings Profiles] Auto-save: uploading ${changes.length} change(s): ${changes.slice(0, 12).join(', ')}${changes.length > 12 ? ', …' : ''}`);
+			await this.saveProfileSettings(profile);
+			new Notice('Saved settings to shared profile.');
+		}
+		catch (e) {
+			(e as Error).message = '[Settings Profiles] Auto-save failed! ' + (e as Error).message;
+			console.error(e);
+		}
+	}
+
+	/**
+	 * The non-volatile files this vault would upload to the profile (changed files + files removed
+	 * from the vault that should be pruned from the profile). Empty means the profile already
+	 * matches this vault.
+	 * @param profile The active profile
+	 */
+	private pendingUploadChanges(profile: ProfileOptions): string[] {
+		const sourcePath = [getVaultPath(), this.app.vault.configDir];
+		const targetPath = [this.getAbsoluteProfilesPath(), profile.name];
+
+		if (!existsSync(join(...sourcePath))) {
+			return [];
+		}
+
+		let patterns = getConfigFilesList(profile);
+		patterns = filterIgnoreFilesList(patterns, profile);
+
+		let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
+		filesList = filterIgnoreFilesList(filesList, profile);
+
+		// Ignore self-rewriting files so layout/recovery noise does not trigger an upload
+		filesList = filesList.filter(file => !VOLATILE_FILES.contains(normalize(file)));
+		const changed = filterChangedFiles(filesList, sourcePath, targetPath);
+
+		const removed = getRemovedFiles(patterns, sourcePath, targetPath, profile);
+		return [...changed, ...removed];
+	}
+
+	/**
+	 * Bumps the profile's sync marker after an upload that changed something, and records the new
+	 * revision as this vault's last-synced revision.
+	 * @param profile The profile that was saved
+	 */
+	private bumpSyncMarker(profile: ProfileOptions) {
+		try {
+			const profileDir = [this.getAbsoluteProfilesPath(), profile.name];
+			const marker = readSyncMarker(profileDir);
+			const rev = (marker?.rev ?? 0) + 1;
+			writeSyncMarker(profileDir, { rev, savedBy: machineIdSync(false), savedAt: new Date().toISOString() });
+			this.setLastSyncedRev(rev);
+			this.saveSettings();
+
+			// eslint-disable-next-line no-console -- diagnostic for the sync marker
+			console.log(`[Settings Profiles] Sync marker bumped -> rev ${rev}.`);
+		}
+		catch (e) {
+			console.error('[Settings Profiles] Failed to bump sync marker!', e);
+		}
+	}
+
+	/**
+	 * Records the profile's current marker revision as this vault's last-synced revision, so after
+	 * a load this vault is considered caught up and may save again.
+	 * @param profile The profile that was loaded
+	 */
+	private catchUpSyncMarker(profile: ProfileOptions) {
+		try {
+			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
+			if (marker) {
+				this.setLastSyncedRev(marker.rev);
+				this.saveSettings();
+			}
+		}
+		catch (e) {
+			console.error('[Settings Profiles] Failed to catch up sync marker!', e);
 		}
 	}
 
@@ -396,6 +566,9 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			// Load profile settings
 			await this.loadProfile(profile.name);
 
+			// This vault is now caught up to the shared profile's revision
+			this.catchUpSyncMarker(profile);
+
 			// Load profile data
 			this.getProfilesList().forEach((value, index, array) => {
 				if (value.name === profile.name) {
@@ -417,10 +590,15 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	async saveProfileSettings(profile: ProfileOptions) {
 		try {
 			// Save profile settings
-			await this.saveProfile(profile.name);
+			const changed = await this.saveProfile(profile.name);
 
 			// Save profile data
 			await saveProfileOptions(profile, this.getAbsoluteProfilesPath());
+
+			// Bump the sync marker so other instances detect the change on their next poll
+			if (changed) {
+				this.bumpSyncMarker(profile);
+			}
 
 			// Reload profiles list from files
 			this.refreshProfilesList();
@@ -601,7 +779,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	 * @param profileName The name of the profile to load.
 	 * @todo Update profile data/settings only when changed
 	 */
-	private async saveProfile(profileName: string) {
+	private async saveProfile(profileName: string): Promise<boolean> {
 		try {
 			const profile = this.getProfile(profileName);
 
@@ -645,11 +823,13 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			if (this.isEnabled(profile)) {
 				this.updateCurrentProfile(profile);
 			}
+			return changed;
 		}
 		catch (e) {
 			new Notice(`Failed to save ${profileName} profile!`);
 			(e as Error).message = 'Failed to save profile! ' + (e as Error).message + ` ProfileName: ${profileName}`;
 			console.error(e);
+			return false;
 		}
 	}
 
@@ -887,6 +1067,14 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 	setProfileUpdate(value: boolean) {
 		this.vaultSettings.profileUpdate = value;
+	}
+
+	getLastSyncedRev(): number {
+		return this.vaultSettings.lastSyncedRev ?? 0;
+	}
+
+	setLastSyncedRev(rev: number) {
+		this.vaultSettings.lastSyncedRev = rev;
 	}
 
 	getStatusbarInteraction(mod?: 'ctrl' | 'shift' | 'alt') {

@@ -7,6 +7,12 @@ declare module 'obsidian' {
 
 	interface App {
 		commands: Commands;
+		setting: SettingsModalHandle;
+	}
+
+	interface SettingsModalHandle {
+		open(): void;
+		close(): void;
 	}
 
 	interface SuggestModal<T> {
