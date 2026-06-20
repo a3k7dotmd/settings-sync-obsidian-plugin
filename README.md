@@ -12,7 +12,7 @@ A fork of [Settings Profiles](https://github.com/4Source/settings-profiles-obsid
 
 ## Manual installation
 
-This plugin is **not** in the Obsidian community store — install it manually:
+This plugin is **not** in the Obsidian community store — install it manually in each of your vaults you want to sync settings:
 
 1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/a3k7dotmd/settings-sync-obsidian-plugin/releases/latest).
 2. Create the folder `<your vault>/.obsidian/plugins/settings-sync/` and copy the three files into it.
