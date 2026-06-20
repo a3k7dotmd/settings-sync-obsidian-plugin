@@ -25,6 +25,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	private statusBarItem: HTMLElement;
 	private settingsListener: FSWatcher;
 	private settingsOpen = false;
+	private remoteReloadPending = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -146,6 +147,15 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		 */
 		this.settingsOpen = this.isSettingsOpen();
 		this.registerInterval(window.setInterval(() => this.checkSettingsClosed(), 600));
+
+		/*
+		 * Download side: poll the shared profile and reload when another vault saved a newer
+		 * revision. Keyed off the marker rev (not file contents/mtime), so it fires once per remote
+		 * save with no workspace.json loop. fs.watch can not see another machine's writes on a share.
+		 */
+		if (this.getProfileUpdate() && this.getAutoReloadRemote()) {
+			this.registerInterval(window.setInterval(() => this.checkRemoteChanges(), this.getRemotePollInterval()));
+		}
 	}
 
 	onunload() {
@@ -311,6 +321,59 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		}
 		catch (e) {
 			console.error('[Settings Profiles] Failed to catch up sync marker!', e);
+		}
+	}
+
+	/**
+	 * Polled on an interval. Reads the shared profile's sync marker and, if another vault has saved
+	 * a newer revision, loads it into this vault and prompts a reload. Loading catches lastSyncedRev
+	 * up to the marker rev, so this fires once per remote save (no re-trigger loop).
+	 */
+	private async checkRemoteChanges() {
+		if (this.remoteReloadPending) {
+			return;
+		}
+		try {
+			if (!this.getProfileUpdate() || !this.getAutoReloadRemote()) {
+				return;
+			}
+			this.refreshProfilesList();
+			const profile = this.getCurrentProfile();
+			if (!profile) {
+				return;
+			}
+
+			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
+
+			// Up to date, no marker yet, or it is our own save -> nothing to pull
+			if (!marker || marker.rev <= this.getLastSyncedRev() || marker.savedBy === machineIdSync(false)) {
+				return;
+			}
+
+			// eslint-disable-next-line no-console -- diagnostic for the remote sync
+			console.log(`[Settings Profiles] Remote change detected (rev ${marker.rev} > local ${this.getLastSyncedRev()}, by ${marker.savedBy}) -> loading.`);
+			this.remoteReloadPending = true;
+
+			const loaded = await this.loadProfileSettings(profile);
+			if (loaded) {
+				this.updateCurrentProfile(loaded);
+			}
+
+			new DialogModal(this.app, 'Reload Obsidian now?', 'The shared profile was updated in another vault. Reload to apply.', () => {
+				this.saveSettings().then(() => {
+					this.app.commands.executeCommandById('app:reload');
+				});
+			}, () => {
+				this.saveSettings();
+				this.remoteReloadPending = false;
+				new Notice('Profile updated elsewhere - reload Obsidian to apply.', 8000);
+			}, 'Reload')
+				.open();
+		}
+		catch (e) {
+			this.remoteReloadPending = false;
+			(e as Error).message = '[Settings Profiles] Remote change check failed! ' + (e as Error).message;
+			console.error(e);
 		}
 	}
 
@@ -1083,6 +1146,34 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 	setLastSyncedRev(rev: number) {
 		this.vaultSettings.lastSyncedRev = rev;
+	}
+
+	getAutoReloadRemote(): boolean {
+		return this.vaultSettings.autoReloadRemote ?? DEFAULT_VAULT_SETTINGS.autoReloadRemote;
+	}
+
+	setAutoReloadRemote(value: boolean) {
+		this.vaultSettings.autoReloadRemote = value;
+	}
+
+	/**
+	 * Returns the remote poll interval in ms, clamped to a sane range.
+	 */
+	getRemotePollInterval(): number {
+		const interval = this.vaultSettings.remotePollInterval;
+		if (!interval || interval < 5000 || interval > 3600000) {
+			return DEFAULT_VAULT_SETTINGS.remotePollInterval;
+		}
+		return interval;
+	}
+
+	setRemotePollInterval(interval: number) {
+		if (interval >= 5000 && interval <= 3600000) {
+			this.vaultSettings.remotePollInterval = interval;
+		}
+		else {
+			this.vaultSettings.remotePollInterval = DEFAULT_VAULT_SETTINGS.remotePollInterval;
+		}
 	}
 
 	getStatusbarInteraction(mod?: 'ctrl' | 'shift' | 'alt') {
