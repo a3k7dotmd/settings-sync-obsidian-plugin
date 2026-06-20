@@ -24,6 +24,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	private globalSettings: GlobalSettings;
 	private statusBarItem: HTMLElement;
 	private settingsListener: FSWatcher;
+	private settingsOpen = false;
 
 	async onload() {
 		await this.loadSettings();
@@ -139,9 +140,12 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 		/*
 		 * Auto-save (upload) the active profile when the Obsidian settings window is closed.
-		 * fs.watch does not deliver events on network shares, so this is the reliable trigger.
+		 * fs.watch does not deliver events on network shares, and patching app.setting.close does
+		 * not reliably intercept the close, so detect the settings modal closing by polling its DOM
+		 * presence (the approach the companion helper uses and that is confirmed to work).
 		 */
-		this.app.workspace.onLayoutReady(() => this.registerSettingsCloseHook());
+		this.settingsOpen = this.isSettingsOpen();
+		this.registerInterval(window.setInterval(() => this.checkSettingsClosed(), 600));
 	}
 
 	onunload() {
@@ -151,38 +155,42 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	}
 
 	/**
-	 * Hooks the Obsidian settings modal so closing it triggers an auto-save of the active profile.
-	 * The hook is restored on unload.
+	 * Whether the Obsidian settings window is currently open. Detected by DOM presence rather than
+	 * by patching app.setting (which does not reliably fire), independent of internal class names.
 	 */
-	private registerSettingsCloseHook() {
+	private isSettingsOpen(): boolean {
 		const settingModal = this.app.setting;
-		if (!settingModal || typeof settingModal.close !== 'function') {
-			// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
-			console.warn('[Settings Profiles] Settings-close hook unavailable (app.setting missing); auto-save on settings close disabled.');
-			return;
+		if (settingModal?.containerEl?.isConnected) {
+			return true;
 		}
+		if (document.querySelector('.mod-settings')) {
+			return true;
+		}
+		if (document.querySelector('.modal .vertical-tab-header')) {
+			return true;
+		}
+		return false;
+	}
 
-		const originalClose = settingModal.close.bind(settingModal);
-		settingModal.close = () => {
-			const result = originalClose();
-			try {
-				this.onSettingsClosed();
-			}
-			catch (e) {
-				console.error('[Settings Profiles] Settings-close handler failed!', e);
-			}
-			return result;
-		};
+	/**
+	 * Polled on an interval. When the settings window transitions from open to closed, triggers an
+	 * auto-save of the active profile.
+	 */
+	private checkSettingsClosed() {
+		const open = this.isSettingsOpen();
+		if (this.settingsOpen && !open) {
+			this.settingsOpen = false;
 
-		// Restore the original close on unload
-		this.register(() => {
-			if (this.app.setting) {
-				this.app.setting.close = originalClose;
-			}
-		});
+			// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+			console.log('[Settings Profiles] Settings window closed.');
+			this.onSettingsClosed();
+		}
+		else if (!this.settingsOpen && open) {
+			this.settingsOpen = true;
 
-		// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
-		console.log('[Settings Profiles] Auto-save on settings-close is active.');
+			// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
+			console.log('[Settings Profiles] Settings window opened.');
+		}
 	}
 
 	/**
