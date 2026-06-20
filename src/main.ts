@@ -4,7 +4,7 @@ import { ProfileSwitcherModal } from './modals/ProfileSwitcherModal';
 import { copyFile, ensurePathExist, getVaultPath, isValidPath, removeDirectoryRecursiveSync, removeFile } from './util/FileSystem';
 import { DEFAULT_VAULT_SETTINGS, VaultSettings, ProfileOptions, GlobalSettings, DEFAULT_GLOBAL_SETTINGS, DEFAULT_PROFILE_OPTIONS, DEFAULT_PROFILE_PATH, StatusbarClickAction } from './settings/SettingsInterface';
 import { containsChangedFiles, filterChangedFiles, filterIgnoreFilesList, getConfigFilesList, getFilesWithoutPlaceholder, getIgnoreFilesList, getRemovedFiles, loadProfileOptions, loadProfilesOptions, saveProfileOptions } from './util/SettingsFiles';
-import { readSyncMarker, writeSyncMarker } from './util/SyncMarker';
+import { readSyncMarker, readSyncMarkerAsync, writeSyncMarker } from './util/SyncMarker';
 import { isAbsolute, join, normalize, sep } from 'path';
 import { FSWatcher, existsSync, watch } from 'fs';
 import { DialogModal } from './modals/DialogModal';
@@ -389,13 +389,18 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			if (!this.getProfileUpdate() || !this.getAutoReloadRemote()) {
 				return;
 			}
-			this.refreshProfilesList();
+
+			/*
+			 * Use the cached profiles list (populated at startup) - do NOT re-scan every profile.json
+			 * over the share on each poll. We only need the active profile here.
+			 */
 			const profile = this.getCurrentProfile();
 			if (!profile) {
 				return;
 			}
 
-			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
+			// Async read so the SMB round-trip does not block the timer handler (setInterval violation)
+			const marker = await readSyncMarkerAsync([this.getAbsoluteProfilesPath(), profile.name]);
 			const remoteRev = marker?.rev ?? 0;
 			this.lastKnownRemoteRev = remoteRev;
 
