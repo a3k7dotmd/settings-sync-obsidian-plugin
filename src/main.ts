@@ -11,6 +11,14 @@ import PluginExtended from './core/PluginExtended';
 import { ICON_CURRENT_PROFILE, ICON_NO_CURRENT_PROFILE, ICON_UNLOADED_PROFILE, ICON_UNSAVED_PROFILE } from './constants';
 import { machineIdSync } from 'node-machine-id';
 
+/*
+ * Files Obsidian rewrites on its own (window layout, file-recovery snapshots), independent of any
+ * user setting change. They must not drive the startup-load decision: Obsidian rewrites
+ * workspace.json during layout restore right after a reload, which would make the startup hook
+ * prompt a reload again and again in a loop.
+ */
+const VOLATILE_STARTUP_FILES = ['workspace.json', 'workspaces.json', 'file-recovery.json'].map(file => normalize(file));
+
 export default class SettingsProfilesPlugin extends PluginExtended {
 	private vaultSettings: VaultSettings;
 	private globalSettings: GlobalSettings;
@@ -208,6 +216,9 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 		let filesList = getFilesWithoutPlaceholder(patterns, sourcePath);
 		filesList = filterIgnoreFilesList(filesList, profile);
+
+		// Ignore self-rewriting files so the reload prompt does not loop after each reload
+		filesList = filesList.filter(file => !VOLATILE_STARTUP_FILES.contains(normalize(file)));
 		if (filterChangedFiles(filesList, sourcePath, targetPath).length > 0) {
 			return true;
 		}
