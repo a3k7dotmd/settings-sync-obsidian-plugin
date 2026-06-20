@@ -285,9 +285,9 @@ export class SettingsProfilesSettingTab extends PluginSettingTab {
 		}
 
 		new Setting(containerEl)
-			.setName('Auto-reload from other vaults')
+			.setName('Auto-reload the active profile when changed elsewhere')
 			.setDesc(createFragment((fragment) => {
-				fragment.append(fragment.createEl('div', { text: 'Poll the shared profile and load it when another vault has saved newer settings.' }), fragment.createEl('div', { text: 'Requires reload for changes to take effect!', cls: 'mod-warning' }));
+				fragment.append(fragment.createEl('div', { text: 'Polls the active profile (the selected one in the list below, stored under the Profile save path) and offers to reload its settings here when another vault has saved newer changes to it.' }), fragment.createEl('div', { text: 'Requires reload for changes to take effect!', cls: 'mod-warning' }));
 			}))
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.getAutoReloadRemote())

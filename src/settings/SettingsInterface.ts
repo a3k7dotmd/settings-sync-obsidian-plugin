@@ -63,8 +63,8 @@ export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 	devices: {},
 	statusbarInteraction: {
 		click: 'auto',
-		ctrl_click: 'none',
-		shift_click: 'none',
+		ctrl_click: 'save',
+		shift_click: 'load',
 		alt_click: 'none',
 	},
 };
