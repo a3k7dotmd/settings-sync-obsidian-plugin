@@ -9,7 +9,7 @@ import { isAbsolute, join, normalize, sep } from 'path';
 import { FSWatcher, existsSync, watch } from 'fs';
 import { DialogModal } from './modals/DialogModal';
 import PluginExtended from './core/PluginExtended';
-import { ICON_CURRENT_PROFILE, ICON_NO_CURRENT_PROFILE, ICON_UNLOADED_PROFILE, ICON_UNSAVED_PROFILE } from './constants';
+import { ICON_CURRENT_PROFILE, ICON_NO_CURRENT_PROFILE, ICON_UNSAVED_PROFILE } from './constants';
 import { machineIdSync } from 'node-machine-id';
 
 /*
@@ -29,6 +29,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	private remoteReloadPending = false;
 	private autoSaveBusy = false;
 	private dismissedRev = 0;
+	private lastKnownRemoteRev = 0;
 
 	async onload() {
 		await this.loadSettings();
@@ -396,6 +397,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
 			const remoteRev = marker?.rev ?? 0;
+			this.lastKnownRemoteRev = remoteRev;
 
 			// eslint-disable-next-line no-console -- diagnostic for the remote sync
 			console.log(`[Settings Profiles] Remote check: marker rev=${remoteRev}, local lastSyncedRev=${this.getLastSyncedRev()}, dismissedRev=${this.dismissedRev}.`);
@@ -461,32 +463,21 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 		let icon = ICON_NO_CURRENT_PROFILE;
 		let label = 'Switch profile';
 
-		// Attach status bar item
-		try {
-			if (profile) {
-				if (this.isProfileSaved(profile)) {
-					if (this.isProfileUpToDate(profile)) {
-						// Profile is up-to-date and saved
-						icon = ICON_CURRENT_PROFILE;
-						label = 'Profile up-to-date';
-					}
-					else {
-						// Profile is not up to date
-						icon = ICON_UNSAVED_PROFILE;
-						label = 'Unloaded changes for this profile';
-					}
-				}
-				else {
-					// Profile is not saved
-					icon = ICON_UNLOADED_PROFILE;
-					label = 'Unsaved changes for this profile';
-				}
+		/*
+		 * Derive the icon from cheap in-memory state (the sync-marker rev cached by the remote poll),
+		 * not by reading profile.json/config over the share every tick. That per-second file I/O on
+		 * the network share is what caused the "'setInterval' handler took Nms" violations.
+		 */
+		if (profile) {
+			if (this.lastKnownRemoteRev > this.getLastSyncedRev()) {
+				// Another vault saved a newer revision that has not been applied here yet
+				icon = ICON_UNSAVED_PROFILE;
+				label = 'Profile changed elsewhere - reload to apply';
 			}
-		}
-		catch (e) {
-			(e as Error).message = 'Failed to check profile state! ' + (e as Error).message;
-			console.error(e);
-			this.updateCurrentProfile(undefined);
+			else {
+				icon = ICON_CURRENT_PROFILE;
+				label = `Profile: ${profile.name}`;
+			}
 		}
 
 		// Update status bar
