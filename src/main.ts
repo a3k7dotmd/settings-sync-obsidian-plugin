@@ -167,14 +167,15 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 				return;
 			}
 
-			if (!this.wouldLoadChangeVault(profile)) {
+			const changes = this.pendingStartupChanges(profile);
+			if (changes.length === 0) {
 				// eslint-disable-next-line no-console -- intentional debug log for the startup safety hook
 				console.log(`[Settings Profiles] Startup load: vault already matches profile "${profile.name}".`);
 				return;
 			}
 
 			// eslint-disable-next-line no-console -- intentional debug log for the startup safety hook
-			console.log(`[Settings Profiles] Startup load: applying shared profile "${profile.name}" to this vault (download-only).`);
+			console.log(`[Settings Profiles] Startup load: applying profile "${profile.name}" (${changes.length} changed: ${changes.slice(0, 12).join(', ')}${changes.length > 12 ? ', …' : ''}).`);
 			this.loadProfileSettings(profile)
 				.then((loaded) => {
 					if (loaded) {
@@ -198,17 +199,19 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	}
 
 	/**
-	 * Whether loading the given profile would change this vault. Mirrors the file selection in
-	 * {@link loadProfile} (changed files to copy + files that would be pruned), so the startup
-	 * hook only disrupts the user with a reload prompt when there is actually something to apply.
+	 * The files that loading the given profile would change in this vault. Mirrors the file
+	 * selection in {@link loadProfile} (changed files to copy + files that would be pruned),
+	 * minus self-rewriting files, so the startup hook only prompts a reload when there is
+	 * actually something to apply - and can log exactly what.
 	 * @param profile The profile that would be loaded
+	 * @returns Relative paths that would change, empty if the vault already matches the profile
 	 */
-	private wouldLoadChangeVault(profile: ProfileOptions): boolean {
+	private pendingStartupChanges(profile: ProfileOptions): string[] {
 		const sourcePath = [this.getAbsoluteProfilesPath(), profile.name];
 		const targetPath = [getVaultPath(), this.app.vault.configDir];
 
 		if (!existsSync(join(...sourcePath))) {
-			return false;
+			return [];
 		}
 
 		let patterns = getConfigFilesList(profile);
@@ -219,13 +222,13 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 		// Ignore self-rewriting files so the reload prompt does not loop after each reload
 		filesList = filesList.filter(file => !VOLATILE_STARTUP_FILES.contains(normalize(file)));
-		if (filterChangedFiles(filesList, sourcePath, targetPath).length > 0) {
-			return true;
-		}
+		const changed = filterChangedFiles(filesList, sourcePath, targetPath);
 
 		const ownPluginDir = normalize(join('plugins', this.manifest.id)) + sep;
-		return getRemovedFiles(patterns, sourcePath, targetPath, profile)
-			.some(file => !normalize(file).startsWith(ownPluginDir));
+		const removed = getRemovedFiles(patterns, sourcePath, targetPath, profile)
+			.filter(file => !normalize(file).startsWith(ownPluginDir));
+
+		return [...changed, ...removed];
 	}
 
 	/**
