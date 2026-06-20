@@ -229,9 +229,13 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	 */
 	private async autoSaveProfile(profile: ProfileOptions) {
 		try {
-			// Anti-clobber: do not auto-save over a profile that changed elsewhere since we last synced
+			/*
+			 * Anti-clobber: do not auto-save over a profile that changed elsewhere since we last
+			 * synced. Keyed off rev vs lastSyncedRev only - savedBy can not distinguish two vaults
+			 * on the same machine (same machine id), and lastSyncedRev already excludes our own save.
+			 */
 			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
-			if (marker && marker.rev > this.getLastSyncedRev() && marker.savedBy !== machineIdSync(false)) {
+			if (marker && marker.rev > this.getLastSyncedRev()) {
 				// eslint-disable-next-line no-console -- diagnostic for the auto-save trigger
 				console.warn(`[Settings Profiles] Auto-save skipped: shared profile is newer (rev ${marker.rev} > local ${this.getLastSyncedRev()}). Reload it before saving from this vault.`);
 				new Notice('Shared profile changed elsewhere - reload it before this vault can save.', 8000);
@@ -345,8 +349,12 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 
 			const marker = readSyncMarker([this.getAbsoluteProfilesPath(), profile.name]);
 
-			// Up to date, no marker yet, or it is our own save -> nothing to pull
-			if (!marker || marker.rev <= this.getLastSyncedRev() || marker.savedBy === machineIdSync(false)) {
+			/*
+			 * Nothing to pull if up to date or no marker yet. We do NOT compare savedBy (machine id):
+			 * two vaults on one machine share it. lastSyncedRev already excludes our own save, since
+			 * saving bumps this vault's lastSyncedRev to the new marker rev.
+			 */
+			if (!marker || marker.rev <= this.getLastSyncedRev()) {
 				return;
 			}
 
