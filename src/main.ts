@@ -30,6 +30,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	private autoSaveBusy = false;
 	private dismissedRev = 0;
 	private lastKnownRemoteRev = 0;
+	private deviceId: string | undefined;
 
 	async onload() {
 		await this.loadSettings();
@@ -346,7 +347,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 			const profileDir = [this.getAbsoluteProfilesPath(), profile.name];
 			const marker = readSyncMarker(profileDir);
 			const rev = (marker?.rev ?? 0) + 1;
-			writeSyncMarker(profileDir, { rev, savedBy: machineIdSync(false), savedAt: new Date().toISOString() });
+			writeSyncMarker(profileDir, { rev, savedBy: this.getDeviceId(), savedAt: new Date().toISOString() });
 			this.setLastSyncedRev(rev);
 			this.saveSettings();
 
@@ -1028,11 +1029,24 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	 * @returns {string} The normalized profile path for the current device.
 	 * @throws {Error} If the device ID cannot be determined.
 	 */
-	getProfilesPath(): string {
-		const deviceID = machineIdSync(false);
-		if (!deviceID || deviceID === '') {
-			throw Error('Failed to load device ID!');
+	/**
+	 * The machine id for this device, cached for the session. node-machine-id's machineIdSync spawns
+	 * a shell subprocess (tens of ms) on every call, so it must not run on the poll path - reading it
+	 * once and reusing it removes the recurring "setInterval handler took Nms" cost.
+	 * @throws {Error} If the device ID cannot be determined.
+	 */
+	private getDeviceId(): string {
+		if (!this.deviceId) {
+			this.deviceId = machineIdSync(false);
+			if (!this.deviceId || this.deviceId === '') {
+				throw Error('Failed to load device ID!');
+			}
 		}
+		return this.deviceId;
+	}
+
+	getProfilesPath(): string {
+		const deviceID = this.getDeviceId();
 
 		const devicePath = this.vaultSettings.devices[deviceID];
 		if (!devicePath || devicePath === '') {
@@ -1096,10 +1110,7 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	 * @throws {Error} If the provided path is invalid (empty after normalization).
 	 */
 	setProfilePath(path: string) {
-		const deviceID = machineIdSync(false);
-		if (!deviceID || deviceID === '') {
-			throw Error('Failed to load device ID!');
-		}
+		const deviceID = this.getDeviceId();
 
 		path = path.trim();
 		if (path !== '') {
