@@ -1,0 +1,22 @@
+# Line-ending policy for this repo - committed so it travels with every clone
+# and OVERRIDES each machine's core.autocrlf and global attributes file.
+# Written by git-bootstrap.sh/.ps1 --repo mode; edit those to change the policy.
+# Working trees are shared between Windows and Linux (CIFS): text stays LF;
+# only cmd.exe scripts get CRLF; .log evidence files are kept byte-exact.
+
+# Everything git detects as text: LF in the repo AND in the working copy
+* text=auto eol=lf
+
+# Unix-executed scripts: bash chokes on CRLF ("/bin/bash^M: bad interpreter")
+*.sh   text eol=lf
+
+# PowerShell parses LF fine; keep shared trees Unix-clean
+*.ps1  text eol=lf
+
+# cmd.exe batch files genuinely require CRLF (GOTO/label parsing breaks on LF)
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Evidence captures (logs written by tools, often on Windows): keep every byte
+# exact - no CR stripping on commit - while staying diffable as text
+*.log  -text
