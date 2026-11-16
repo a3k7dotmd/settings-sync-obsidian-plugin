@@ -6,6 +6,7 @@ import { DEFAULT_VAULT_SETTINGS, VaultSettings, ProfileOptions, GlobalSettings, 
 import { containsChangedFiles, filterChangedFiles, filterIgnoreFilesList, getConfigFilesList, getFilesWithoutPlaceholder, getIgnoreFilesList, getRemovedFiles, loadProfileOptions, loadProfilesOptions, saveProfileOptions } from './util/SettingsFiles';
 import { readSyncMarker, readSyncMarkerAsync, writeSyncMarker } from './util/SyncMarker';
 import { isAbsolute, join, normalize, sep } from 'path';
+import { hostname } from 'os';
 import { FSWatcher, existsSync, watch } from 'fs';
 import { DialogModal } from './modals/DialogModal';
 import PluginExtended from './core/PluginExtended';
@@ -19,6 +20,12 @@ import { machineIdSync } from 'node-machine-id';
  * triggers, so they never sync and never churn the profile or bump the sync revision.
  */
 const VOLATILE_FILES = ['workspace.json', 'workspaces.json', 'file-recovery.json'].map(file => normalize(file));
+
+/*
+ * localStorage key under which the machine id is kept between Obsidian starts. Obsidian stores
+ * localStorage on the machine, outside the vault, so the value is never synced or shared.
+ */
+const DEVICE_ID_CACHE_KEY = 'settings-sync-device-id';
 
 export default class SettingsProfilesPlugin extends PluginExtended {
 	private vaultSettings: VaultSettings;
@@ -1044,16 +1051,39 @@ export default class SettingsProfilesPlugin extends PluginExtended {
 	 * @throws {Error} If the device ID cannot be determined.
 	 */
 	/**
-	 * The machine id for this device, cached for the session. node-machine-id's machineIdSync spawns
-	 * a shell subprocess (tens of ms) on every call, so it must not run on the poll path - reading it
-	 * once and reusing it removes the recurring "setInterval handler took Nms" cost.
+	 * The machine id for this device, cached for the session and, across Obsidian starts, in
+	 * localStorage. node-machine-id's machineIdSync spawns a subprocess (cmd.exe + REG.exe on
+	 * Windows, tens of ms and more on a first call) that blocks the window. It must not run on the
+	 * poll path (the recurring "setInterval handler took Nms" cost), and since 0.7.4 it no longer
+	 * runs at every start either: onload() needs the id to find the profiles path, so the subprocess
+	 * was part of every Obsidian startup.
+	 * The host name is stored with the id, so an Obsidian profile copied to another machine asks
+	 * the system again instead of reusing the old machine's id.
 	 * @throws {Error} If the device ID cannot be determined.
 	 */
 	private getDeviceId(): string {
 		if (!this.deviceId) {
-			this.deviceId = machineIdSync(false);
-			if (!this.deviceId || this.deviceId === '') {
-				throw Error('Failed to load device ID!');
+			const host = hostname();
+			try {
+				const cached = JSON.parse(window.localStorage.getItem(DEVICE_ID_CACHE_KEY) ?? 'null');
+				if (cached && cached.host === host && typeof cached.id === 'string' && cached.id !== '') {
+					this.deviceId = cached.id;
+				}
+			}
+			catch (e) {
+				// Unreadable cache entry: ask the system below
+			}
+			if (!this.deviceId) {
+				this.deviceId = machineIdSync(false);
+				if (!this.deviceId || this.deviceId === '') {
+					throw Error('Failed to load device ID!');
+				}
+				try {
+					window.localStorage.setItem(DEVICE_ID_CACHE_KEY, JSON.stringify({ id: this.deviceId, host }));
+				}
+				catch (e) {
+					// localStorage not writable: the id stays cached for this session only
+				}
 			}
 		}
 		return this.deviceId;
