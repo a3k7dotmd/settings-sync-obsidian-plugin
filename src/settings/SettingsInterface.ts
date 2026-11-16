@@ -1,7 +1,5 @@
 import { join, normalize, sep as slash } from 'path';
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const xdg = require('@folder/xdg');
+import { defaultDataDir } from '../util/DefaultDataDir';
 
 export interface GlobalSettings {
 	profilesList: ProfileOptions[];
@@ -49,7 +47,7 @@ export interface VaultSettings {
 	}
 }
 
-export const DEFAULT_PROFILE_PATH = normalize(join(xdg({ subdir: 'ObsidianPlugins' }).data, 'Profiles'));
+export const DEFAULT_PROFILE_PATH = normalize(join(defaultDataDir('ObsidianPlugins'), 'Profiles'));
 
 export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
 	activeProfile: {},

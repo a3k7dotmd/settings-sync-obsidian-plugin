@@ -1,6 +1,6 @@
 {
 	"name": "settings-sync-obsidian-plugin",
-	"version": "0.7.4",
+	"version": "0.7.5",
 	"description": "Sync Obsidian settings between vaults through shared profiles (fork of settings-profiles)",
 	"main": "main.js",
 	"scripts": {
@@ -34,7 +34,6 @@
 		"typescript": "4.7.4"
 	},
 	"dependencies": {
-		"@folder/xdg": "^4.0.1",
 		"node-machine-id": "^1.1.12"
 	}
 }
