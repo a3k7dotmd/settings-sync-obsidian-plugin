@@ -1,13 +1,16 @@
 # Settings Sync
 
-A fork of [Settings Profiles](https://github.com/4Source/settings-profiles-obsidian-plugin) by 4Source, reworked for **reliable two-way settings sync across vaults** — including when the shared profile store lives on a **network / SMB share**. It uses a distinct plugin id (`settings-sync`) so it never conflicts with or gets overwritten by the upstream plugin.
+Based on [Settings Profiles](https://github.com/4Source/settings-profiles-obsidian-plugin) by [4Source](https://github.com/4Source), reworked for **reliable two-way settings sync across vaults** — including when the shared profile store lives on a **network / SMB share**. It uses a distinct plugin id (`settings-sync`) so it never conflicts with or gets overwritten by the original plugin.
+
+> [!NOTE]
+> **Credits.** Settings Sync started as a fork of Settings Profiles and is now maintained as a separate plugin in this repository. The original plugin is the work of 4Source and its contributors; their commit history is kept here, and the original copyright notice is in [LICENSE](LICENSE) (MIT). Everything below the horizontal line further down is the original plugin's documentation, including its contribution and support links, which point to the original author.
 
 ### What changed from the original, and why
 
 - **Plugin deletions now propagate.** Removing a community plugin used to reappear on the next load. Save/load now mirror the source instead of only ever adding files.
-- **Auto-sync actually works.** The original relied on `fs.watch` + file modification times — which don't fire / aren't reliable on network shares — and its change detection was effectively disabled by an `async`-callback bug. This fork **uploads when the settings window closes** and **pulls remote changes via a revision marker** (checked on startup and every 30s), with no `fs.watch` and no reliance on mtime.
+- **Auto-sync actually works.** The original relied on `fs.watch` + file modification times — which don't fire / aren't reliable on network shares — and its change detection was effectively disabled by an `async`-callback bug. Settings Sync **uploads when the settings window closes** and **pulls remote changes via a revision marker** (checked on startup and every 30s), with no `fs.watch` and no reliance on mtime.
 - **`workspace.json` is no longer synced.** Syncing it closed your open notes in the receiving vault; it (and `file-recovery.json`) are now excluded.
-- **Reliability & performance fixes.** No more apply-revert (a loaded change overwritten by Obsidian before reload), no settings-flush race on save, and the device id is read once instead of every poll — so there are no recurring `setInterval` console violations.
+- **Reliability & performance fixes.** No more apply-revert (a loaded change overwritten by Obsidian before reload), no settings-flush race on save, and the device id is read once instead of every poll — so there are no recurring `setInterval` console violations. Since 0.7.4 the device id is also kept between Obsidian starts, so startup no longer waits for the subprocess that reads it (on Windows `cmd.exe` + `REG.exe`).
 - **Defaults:** Ctrl-click the status bar = Save, Shift-click = Load.
 
 ## Manual installation
