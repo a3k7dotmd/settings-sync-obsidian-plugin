@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join, normalize, sep as slash } from 'path';
 import { PROFILE_OPTIONS_MAP, ProfileOptions } from 'src/settings/SettingsInterface';
-import { ensurePathExist, filesEqual, getAllFiles, isValidPath } from './FileSystem';
+import { ensurePathExist, filesEqual, filesEqualSync, getAllFiles, isValidPath } from './FileSystem';
 
 /**
  * Saves the profile options data to the path.
@@ -304,7 +304,7 @@ export function filterUnchangedFiles(filesList: string[], sourcePath: string[], 
 			return false;
 		}
 
-		return filesEqual(sourceFile, targetFile);
+		return filesEqualSync(sourceFile, targetFile);
 	});
 }
 
@@ -347,7 +347,7 @@ export function filterChangedFiles(filesList: string[], sourcePath: string[], ta
 			return true;
 		}
 
-		return !filesEqual(sourceFile, targetFile);
+		return !filesEqualSync(sourceFile, targetFile);
 	});
 }
 

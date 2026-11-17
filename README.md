@@ -11,6 +11,7 @@ Based on [Settings Profiles](https://github.com/4Source/settings-profiles-obsidi
 - **Auto-sync actually works.** The original relied on `fs.watch` + file modification times — which don't fire / aren't reliable on network shares — and its change detection was effectively disabled by an `async`-callback bug. Settings Sync **uploads when the settings window closes** and **pulls remote changes via a revision marker** (checked on startup and every 30s), with no `fs.watch` and no reliance on mtime.
 - **`workspace.json` is no longer synced.** Syncing it closed your open notes in the receiving vault; it (and `file-recovery.json`) are now excluded.
 - **Reliability & performance fixes.** No more apply-revert (a loaded change overwritten by Obsidian before reload), no settings-flush race on save, and the device id is read once instead of every poll — so there are no recurring `setInterval` console violations. Since 0.7.4 the device id is also kept between Obsidian starts, so startup no longer waits for the subprocess that reads it (on Windows `cmd.exe` + `REG.exe`). Since 0.7.5 `main.js` no longer carries the YAML, TOML and INI parsers of a library that was only used to find the default profiles folder, which makes the file about a fifth of its former size.
+- **Changes that keep a file's size now sync (0.7.6).** A file whose content changed while its size stayed the same — a plugin's `manifest.json` going from 1.2.5 to 1.2.6, a setting changed to a value of the same length — was treated as unchanged and never copied, in either direction. Files of equal size are now compared by content.
 - **Defaults:** Ctrl-click the status bar = Save, Shift-click = Load.
 
 ## Manual installation
@@ -25,6 +26,40 @@ To update later, replace those three files with the newer ones and reload Obsidi
 
 > [!NOTE]
 > **The plugin does not sync itself.** Its own folder (`plugins/settings-sync/`) is excluded from the synced files, so loading a profile never overwrites a vault's copy of the plugin with a different version. Install and update the plugin in each vault yourself (from the release); it is neither pushed to nor pulled from the shared profile store.
+
+### Updating the plugin in every vault
+
+Because the plugin never syncs its own folder, **an update has to be copied into each vault by hand**: the three files `main.js`, `manifest.json` and `styles.css`. Saving or loading a profile from an updated vault does *not* update the plugin in your other vaults.
+
+List your vaults in one of the snippets below. It downloads the three files of the latest release into each vault and prints the version that is now installed there. `data.json` (the vault's own settings) is not touched. Reload Obsidian in each vault afterwards.
+
+bash (Linux, macOS, Git Bash on Windows):
+
+```bash
+for vault in "$HOME/Documents/Vault One" "$HOME/Documents/Vault Two"; do
+  dir="$vault/.obsidian/plugins/settings-sync"
+  mkdir -p "$dir"
+  for file in main.js manifest.json styles.css; do
+    curl -fsSL -o "$dir/$file" "https://github.com/a3k7dotmd/settings-sync-obsidian-plugin/releases/latest/download/$file"
+  done
+  grep '"version"' "$dir/manifest.json"
+done
+```
+
+PowerShell (Windows):
+
+```powershell
+foreach ($vault in 'C:\Vaults\Vault One', 'C:\Vaults\Vault Two') {
+    $dir = Join-Path $vault '.obsidian\plugins\settings-sync'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    foreach ($file in 'main.js', 'manifest.json', 'styles.css') {
+        Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/a3k7dotmd/settings-sync-obsidian-plugin/releases/latest/download/$file" -OutFile (Join-Path $dir $file)
+    }
+    Select-String -Path (Join-Path $dir 'manifest.json') -Pattern '"version"'
+}
+```
+
+To copy from a vault that already has the new version instead of downloading, take the same three files from its `.obsidian/plugins/settings-sync/` folder.
 
 ---
 

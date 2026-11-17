@@ -1,4 +1,4 @@
-import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'fs';
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'fs';
 import { FileSystemAdapter } from 'obsidian';
 import { basename, dirname, join, normalize, sep as slash } from 'path';
 import { PassThrough, Readable } from 'stream';
@@ -329,6 +329,33 @@ export const FILE_IGNORE_LIST = [
  *  Credits: https://github.com/fent/node-stream-equal //
  * ----------------------------------------------------//
  */
+/**
+ * Checks whether two files have the same content, and answers at once.
+ *
+ * Use this one in filters and conditions. filesEqual() below answers through a promise; negating
+ * or testing that promise without awaiting it is always "true", which until 0.7.5 made every file
+ * of unchanged size look unchanged, so a manifest going from 1.2.5 to 1.2.6 was never synced.
+ *
+ * Same size and same modification time count as equal without reading the files. A file copied
+ * by this plugin keeps the modification time of its source on Windows, so after a sync nothing
+ * has to be read from the (network) share. Only files of equal size and different time are read
+ * and compared. Where a copy does not keep the time (Linux, macOS) the content is compared.
+ * @param file1 File path of first file
+ * @param file2 File path of second file
+ * @returns Are the files equal
+ */
+export function filesEqualSync(file1: string, file2: string): boolean {
+	const stat1 = statSync(file1);
+	const stat2 = statSync(file2);
+	if (stat1.size !== stat2.size) {
+		return false;
+	}
+	if (stat1.mtimeMs === stat2.mtimeMs) {
+		return true;
+	}
+	return readFileSync(file1).equals(readFileSync(file2));
+}
+
 /**
  * Checks the file content of the file is equal
  * @param file1 File path of first file
